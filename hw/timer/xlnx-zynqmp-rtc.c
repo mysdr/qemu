@@ -30,6 +30,7 @@
 #include "hw/register.h"
 #include "qemu/bitops.h"
 #include "qemu/log.h"
+#include "hw/ptimer.h"
 
 #ifndef XLNX_ZYNQMP_RTC_ERR_DEBUG
 #define XLNX_ZYNQMP_RTC_ERR_DEBUG 0
@@ -39,6 +40,14 @@
 
 #define XLNX_ZYNQMP_RTC(obj) \
      OBJECT_CHECK(XlnxZynqMPRTC, (obj), TYPE_XLNX_ZYNQMP_RTC)
+
+#define DB_PRINT_L(lvl, fmt, args...) do { \
+    if (XLNX_ZYNQMP_RTC_ERR_DEBUG >= lvl) { \
+        qemu_log("%s: " fmt, __func__, ## args); \
+    } \
+} while (0);
+
+#define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ## args)
 
 REG32(SET_TIME_WRITE, 0x0)
 REG32(SET_TIME_READ, 0x4)
@@ -88,6 +97,8 @@ typedef struct XlnxZynqMPRTC {
     qemu_irq irq_rtc_int;
     qemu_irq irq_addr_error_int;
 
+    struct tm current_tm;
+
     uint32_t regs[XLNX_ZYNQMP_RTC_R_MAX];
     RegisterInfo regs_info[XLNX_ZYNQMP_RTC_R_MAX];
 } XlnxZynqMPRTC;
@@ -102,6 +113,13 @@ static void addr_error_int_update_irq(XlnxZynqMPRTC *s)
 {
     bool pending = s->regs[R_ADDR_ERROR] & ~s->regs[R_ADDR_ERROR_INT_MASK];
     qemu_set_irq(s->irq_addr_error_int, pending);
+}
+
+static uint64_t current_time_postr(RegisterInfo *reg, uint64_t val64)
+{
+    XlnxZynqMPRTC *s = XLNX_ZYNQMP_RTC(reg->opaque);
+
+    return mktime(&s->current_tm);
 }
 
 static void rtc_int_status_postw(RegisterInfo *reg, uint64_t val64)
@@ -160,11 +178,13 @@ static const RegisterAccessInfo rtc_regs_info[] = {
     {   .name = "SET_TIME_WRITE",  .addr = A_SET_TIME_WRITE,
     },{ .name = "SET_TIME_READ",  .addr = A_SET_TIME_READ,
         .ro = 0xffffffff,
+        .post_read = current_time_postr,
     },{ .name = "CALIB_WRITE",  .addr = A_CALIB_WRITE,
     },{ .name = "CALIB_READ",  .addr = A_CALIB_READ,
         .ro = 0x1fffff,
     },{ .name = "CURRENT_TIME",  .addr = A_CURRENT_TIME,
         .ro = 0xffffffff,
+        .post_read = current_time_postr,
     },{ .name = "CURRENT_TICK",  .addr = A_CURRENT_TICK,
         .ro = 0xffff,
     },{ .name = "ALARM",  .addr = A_ALARM,
@@ -203,6 +223,13 @@ static void rtc_reset(DeviceState *dev)
     for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i) {
         register_reset(&s->regs_info[i]);
     }
+
+    qemu_get_timedate(&s->current_tm, 0);
+
+    DB_PRINT("Get time from host: %d-%d-%d %2d:%02d:%02d\n",
+             s->current_tm.tm_year, s->current_tm.tm_mon,
+             s->current_tm.tm_mday, s->current_tm.tm_hour,
+             s->current_tm.tm_min, s->current_tm.tm_sec);
 
     rtc_int_update_irq(s);
     addr_error_int_update_irq(s);
@@ -252,6 +279,13 @@ static const VMStateDescription vmstate_rtc = {
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, XlnxZynqMPRTC, XLNX_ZYNQMP_RTC_R_MAX),
+        VMSTATE_INT32(current_tm.tm_sec, XlnxZynqMPRTC),
+        VMSTATE_INT32(current_tm.tm_min, XlnxZynqMPRTC),
+        VMSTATE_INT32(current_tm.tm_hour, XlnxZynqMPRTC),
+        VMSTATE_INT32(current_tm.tm_wday, XlnxZynqMPRTC),
+        VMSTATE_INT32(current_tm.tm_mday, XlnxZynqMPRTC),
+        VMSTATE_INT32(current_tm.tm_mon, XlnxZynqMPRTC),
+        VMSTATE_INT32(current_tm.tm_year, XlnxZynqMPRTC),
         VMSTATE_END_OF_LIST(),
     }
 };
