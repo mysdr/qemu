@@ -434,7 +434,7 @@ void HELPER(wfi)(CPUARMState *env)
     if (use_icount) {
         cs->exception_index = EXCP_YIELD;
     } else {
-        cs->halted = 1;
+        cs->halted = false;
         cs->exception_index = EXCP_HLT;
     }
 
@@ -475,6 +475,7 @@ void HELPER(sev)(CPUARMState *env)
         if (i == cs || i->halt_pin || i->reset_pin || i->arch_halt_pin) {
             continue;
         }
+        cs->halted = false;
         cpu_reset_interrupt(i, CPU_INTERRUPT_HALT);
     }
 }
