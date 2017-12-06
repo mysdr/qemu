@@ -434,6 +434,7 @@ void HELPER(wfi)(CPUARMState *env)
     if (use_icount) {
         cs->exception_index = EXCP_YIELD;
     } else {
+        cs->halted = 1;
         cs->exception_index = EXCP_HLT;
     }
 
